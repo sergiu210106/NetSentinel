@@ -1,2 +1,12 @@
-agent/venv/
-server/venv/
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Model artefacts — too large and not portable across Python versions
+server/model.pkl
+server/KDDTrain+.txt
+
+# Frontend (Sprint 3)
+frontend/node_modules/
+frontend/build/
