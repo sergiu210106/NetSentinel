@@ -1,25 +1,31 @@
 import socket
 import json
 import time
+import os
 from scapy.all import sniff, IP, TCP, UDP
 
 # Configuration
-SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 9999
+SERVER_HOST = os.getenv('SERVER_IP', '127.0.0.1')
+SERVER_PORT = int(os.getenv('SERVER_PORT', 9999))
 
 # Global socket connection
 client_socket = None
 
 def connect_to_server():
-    """Establishes a TCP connection to the server."""
+    """Establishes a TCP connection to the server with retry logic."""
     global client_socket
-    try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.connect((SERVER_HOST, SERVER_PORT))
-        print(f"[+] Connected to server at {SERVER_HOST}:{SERVER_PORT}")
-    except ConnectionRefusedError:
-        print("[-] Connection failed. Is the server running?")
-        exit(1)
+    while True: # Keep trying until successful
+        try:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect((SERVER_HOST, SERVER_PORT))
+            print(f"[+] Connected to server at {SERVER_HOST}:{SERVER_PORT}")
+            return # Exit the loop once connected
+        except ConnectionRefusedError:
+            print(f"[-] Server not ready at {SERVER_HOST}:{SERVER_PORT}. Retrying in 5s...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[-] Unexpected error: {e}. Retrying...")
+            time.sleep(5)
 
 def process_packet(packet):
     """Callback for every packet sniffed."""
@@ -63,10 +69,20 @@ def send_data(data):
 
 def start_sniffing():
     print("[*] Starting packet sniffer...")
-    # count=0 means sniff indefinitely
-    # prn=process_packet calls our function on every packet
-    # store=0 prevents storing packets in memory (saves RAM)
-    sniff(prn=process_packet, store=0)
+    
+    # FILTER EXPLANATION:
+    # "not port 9999" -> Ignore traffic to/from the Agent-to-Server TCP link
+    # "not port 8000" -> Ignore traffic to/from the FastAPI/WebSocket link
+    # "not port 80"   -> Ignore traffic to/from the Frontend web server
+    
+    bpf_filter = f"not port {SERVER_PORT} and not port 8000 and not port 80"
+    
+    # Add the 'filter' argument here:
+    sniff(
+        prn=process_packet, 
+        filter=bpf_filter, 
+        store=0
+    )
 
 if __name__ == "__main__":
     connect_to_server()

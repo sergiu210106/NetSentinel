@@ -1,6 +1,57 @@
+```markdown
 # 🛡️ NetSentinel
 
-> A real-time network intrusion detection system (IDS) built across 4 sprints — from raw packet capture to a live ML-powered dashboard.
+A real-time network intrusion detection system built across 4 sprints — from raw packet capture to a live ML-powered dashboard.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Train the ML model (one-time)
+cd server && source venv/bin/activate && python3 train_model.py
+
+# 2. Start the server
+python3 server.py
+
+# 3. In a new terminal — start the agent (requires root)
+cd agent && sudo venv/bin/python3 agent.py
+```
+
+Packets are now captured, streamed, and classified in real time. Open a browser or run `ping` to see alerts in your server terminal.
+
+---
+
+## Architecture
+
+```
+┌──────────────────┐       TCP + JSON       ┌─────────────────────────────────────────┐
+│      AGENT       │  ──────────────────►   │                 SERVER                  │
+│                  │                        │                                         │
+│  scapy sniff()   │  {"src_ip": "...",     │  asyncio TCP listener                   │
+│       │          │   "dst_port": 443,     │       │                                 │
+│       ▼          │   "size": 1200,        │       ▼                                 │
+│  extract features│   "protocol": "TCP"}   │  ThreatDetector.predict()              │
+│       │          │                        │       │                                 │
+│       ▼          │                        │       ├─ Heuristics (size, blocked ports)│
+│  JSON serialize  │                        │       │                                 │
+│       │          │                        │       └─ Random Forest (NSL-KDD)        │
+│       ▼          │                        │       │                                 │
+│  TCP send        │                        │       ▼                                 │
+└──────────────────┘                        │  [ALERT] or [INFO]                      │
+                                            └─────────────────────────────────────────┘
+```
+
+---
+
+## Sprint Roadmap
+
+| Sprint | Goal | Status |
+|--------|------|--------|
+| 1 | Live packet capture → TCP socket pipeline | ✅ Complete |
+| 2 | ML classification with Random Forest on NSL-KDD | ✅ Complete |
+| 3 | FastAPI backend + SQLite + React dashboard | 🔜 Upcoming |
+| 4 | Docker, docker-compose, attack demo | 🔜 Upcoming |
 
 ---
 
@@ -19,53 +70,23 @@ netsentinel/
 │   ├── server.py
 │   ├── threat_detector.py          # Sprint 2
 │   ├── train_model.py              # Sprint 2
+│   ├── test_checkpoint.py          # Sprint 2
 │   ├── model.pkl                   # Sprint 2 — generated, not committed
 │   ├── KDDTrain+.txt               # Sprint 2 — generated, not committed
 │   └── requirements.txt
 │
-├── frontend/                       # Sprint 3 — React dashboard (coming soon)
+├── frontend/                       # Sprint 3 — React dashboard
 │
-├── docker-compose.yml              # Sprint 4 — orchestration (coming soon)
+├── docker-compose.yml              # Sprint 4 — orchestration
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## Sprint Roadmap
-
-| Sprint | Goal | Status |
-|--------|------|--------|
-| 1 | Live packet capture → TCP socket pipeline | ✅ Complete |
-| 2 | ML classification with Random Forest on NSL-KDD | ✅ Complete |
-| 3 | FastAPI backend + SQLite + React dashboard | 🔜 Upcoming |
-| 4 | Docker, docker-compose, attack demo | 🔜 Upcoming |
-
----
-
 # Sprint 1: The Data Pipeline ✅
 
-## Goal
 Capture live network packets on one machine and stream them in real-time to a server via TCP sockets.
-
-## Architecture
-
-```
-┌─────────────────────────────┐         TCP Socket          ┌──────────────────────────────┐
-│           AGENT             │   ────────────────────►     │           SERVER             │
-│                             │                             │                              │
-│  scapy sniff()              │    {"src_ip": "...",        │  asyncio TCP listener        │
-│     │                       │     "dst_port": 443,        │     │                        │
-│     ▼                       │     "size": 1200,           │     ▼                        │
-│  extract features           │     "protocol": "TCP"}      │  deserialize JSON            │
-│     │                       │                             │     │                        │
-│     ▼                       │                             │     ▼                        │
-│  JSON serialize             │                             │  print to console            │
-│     │                       │                             │                              │
-│     ▼                       │                             │                              │
-│  TCP socket send            │                             │                              │
-└─────────────────────────────┘                             └──────────────────────────────┘
-```
 
 ## Features Extracted Per Packet
 
@@ -96,7 +117,7 @@ pip install -r requirements.txt   # scapy
 cd server/
 python3 -m venv venv
 source venv/bin/activate
-# no third-party deps in Sprint 1 — stdlib asyncio only
+# Sprint 1 uses stdlib asyncio only — no third-party deps yet
 ```
 
 ## Running
@@ -116,14 +137,15 @@ python3 server.py
 cd agent && sudo venv/bin/python3 agent.py
 ```
 
-Or grant capabilities once and skip `sudo` permanently:
+Or grant capabilities once to skip `sudo` permanently:
 ```bash
 sudo setcap cap_net_raw,cap_net_admin=eip $(readlink -f venv/bin/python3)
 venv/bin/python3 agent.py
 ```
 
 ## Checkpoint ✅
-With both processes running, generate traffic on the agent machine (open a browser, run a ping). The server terminal should print:
+
+With both processes running, generate traffic on the agent machine (open a browser, run `ping`). The server terminal should print:
 
 ```
 [+] New connection from ('127.0.0.1', 52341)
@@ -135,40 +157,7 @@ With both processes running, generate traffic on the agent machine (open a brows
 
 # Sprint 2: Intelligence and Logic ✅
 
-## Goal
 Replace the `print` statement with a classifier that labels every packet **Benign** or **Malicious** in real time using a two-layer detection approach: fast rule-based heuristics backed by a Random Forest model trained on NSL-KDD.
-
-## Architecture
-
-```
-┌──────────────┐   TCP + JSON   ┌──────────────────────────────────────────────┐
-│    AGENT     │ ─────────────► │                  SERVER                      │
-│  (unchanged) │                │                                              │
-└──────────────┘                │  handle_client()                             │
-                                │       │                                      │
-                                │       ▼                                      │
-                                │  ThreatDetector.predict(packet_data)         │
-                                │       │                                      │
-                                │       ├─ _apply_heuristics()                 │
-                                │       │    size >= 9001B?  → Malicious 0.97  │
-                                │       │    port in blocklist? → Malicious 0.91│
-                                │       │    no rule fired ──────────────┐     │
-                                │       │                                ▼     │
-                                │       └─ RandomForest.predict(DataFrame)     │
-                                │                      │                       │
-                                │                      ▼                       │
-                                │       [ALERT] Malicious | [INFO] Benign      │
-                                └──────────────────────────────────────────────┘
-```
-
-## New Files
-
-| File | Purpose |
-|------|---------|
-| `server/train_model.py` | Downloads NSL-KDD, trains Random Forest, saves `model.pkl` |
-| `server/threat_detector.py` | `ThreatDetector` class — heuristics + ML inference |
-| `server/server.py` | Updated — calls `predict()` on every packet |
-| `server/test_checkpoint.py` | Sends 8 crafted packets to verify both detection layers |
 
 ## Detection Logic
 
@@ -185,7 +174,7 @@ Rule 2: dst_port in blocklist?      → Malicious (confidence: 0.91)
 Random Forest (4 features)          → Benign / Malicious + probability
 ```
 
-**Why heuristics?** NSL-KDD records are *session-level* (total bytes across an entire connection). A model trained on session totals cannot reliably classify a single 65,535-byte packet as a flood — that packet is statistically normal as a session total. Rules give reliable signal for the obvious cases; the ML model handles subtler ones like zero-byte SYN floods (neptune-style attacks), where the training data provides genuine signal.
+**Why heuristics first?** NSL-KDD records are *session-level* (total bytes across an entire connection). A model trained on session totals cannot reliably classify a single 65,535-byte packet as a flood — that packet is statistically normal as a session total. Rules give reliable signal for the obvious cases; the ML model handles subtler patterns like zero-byte SYN floods (neptune-style attacks), where the training data provides genuine signal.
 
 ## Feature Mapping: Agent dict → NSL-KDD features
 
@@ -279,6 +268,84 @@ The last packet (zero-byte SYN, normal port) is the most significant — both he
 
 ---
 
+# Sprint 3: The Frontend & Database 🔜
+
+**Goal:** Persist the data and visualize it in a browser instead of the console.
+
+## Planned Architecture
+
+```
+┌──────────┐   TCP/JSON   ┌──────────────────────────────────────────┐
+│  AGENT   │ ──────────►  │                 SERVER                   │
+└──────────┘              │                                          │
+                          │  ThreatDetector.predict()                │
+                          │       │                                  │
+                          │       ▼                                  │
+                          │  SQLite  ──►  FastAPI                   │
+                          │                │    │                    │
+                          │                │    ├─ GET /alerts       │
+                          │                │    └─ WS  /ws          │
+                          │                │         │              │
+                          └────────────────┼─────────┼──────────────┘
+                                           │         │
+                                           │    WebSocket
+                                           │         │
+                                     ┌─────▼─────────▼─────┐
+                                     │      REACT APP      │
+                                     │                     │
+                                     │  ┌───────────────┐  │
+                                     │  │  Alerts Table  │  │
+                                     │  │  (live update) │  │
+                                     │  └───────────────┘  │
+                                     └─────────────────────┘
+```
+
+## Tasks
+
+| Task | Description |
+|------|-------------|
+| 3.1 | Set up SQLite — create `alerts` table (`id`, `timestamp`, `src_ip`, `prediction`, `confidence`) |
+| 3.2 | Wrap server logic in FastAPI — `GET /alerts` (last 50) + `WS /ws` (real-time push) |
+| 3.3 | Build React dashboard — alerts table, native WebSocket connection, live state updates |
+
+---
+
+# Sprint 4: Containerization & Attack Demo 🔜
+
+**Goal:** Dockerize the full stack and prove detection works against a simulated threat.
+
+## Planned Architecture
+
+```
+                    docker-compose network
+    ┌─────────────────────────────────────────────────────────┐
+    │                                                         │
+    │  ┌──────────┐   TCP    ┌────────────┐   API/WS   ┌──────────┐
+    │  │  AGENT   │ ──────► │   SERVER   │ ─────────► │ FRONTEND │
+    │  │ (NET_ADMIN)│        │            │            │  (Nginx) │
+    │  └──────────┘         │  SQLite    │            └──────────┘
+    │                        └────────────┘                    │
+    │                             ▲                           │
+    │                             │                           │
+    │  ┌──────────┐   raw pkts   │                           │
+    │  │ ATTACKER │ ─────────────┘                           │
+    │  │ (temp)   │                                          │
+    │  └──────────┘                                          │
+    └─────────────────────────────────────────────────────────┘
+```
+
+## Tasks
+
+| Task | Description |
+|------|-------------|
+| 4.1 | Dockerize all components (Agent needs `NET_ADMIN`, Frontend uses Nginx) |
+| 4.2 | Write `docker-compose.yml` with service definitions and environment variables |
+| 4.3 | Write attack script — rapid requests (DoS sim) + blocked-port probes |
+| 4.4 | Final verification — `docker-compose up`, trigger attacker, watch dashboard |
+| 4.5 | Add dashboard screenshot and architecture diagram to this README |
+
+---
+
 ## .gitignore
 
 ```gitignore
@@ -298,6 +365,7 @@ frontend/build/
 
 ---
 
-## Up Next — Sprint 3: The Frontend & Database
+## License
 
-Sprint 3 will persist every classified packet to **SQLite**, expose the data via a **FastAPI** REST + WebSocket API, and visualise it in a live **React dashboard** that updates in real time as packets arrive.
+This project is for educational and research purposes.
+```

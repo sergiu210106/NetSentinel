@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  server:
+    build: ./server
+    container_name: netsentinel-server
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "9999:9999"
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s = socket.socket(); s.connect(('127.0.0.1', 9999))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  agent:
+    build: ./agent
+    container_name: netsentinel-agent
+    network_mode: "service:server"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      - SERVER_IP=127.0.0.1
+      - SERVER_PORT=9999
+  frontend:
+    build: ./frontend
+    container_name: netsentinel-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
+volumes:
+  server_data:
